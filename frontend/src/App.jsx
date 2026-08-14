@@ -1,4 +1,7 @@
 import { useState, useEffect, useRef } from "react";
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import { auth } from "./firebase";
+import Login from "./Login";
 import { listVideos, uploadVideo, connectStream } from "./api";
 
 const PHASE_STYLES = {
@@ -8,6 +11,9 @@ const PHASE_STYLES = {
 };
 
 function App() {
+  const [user, setUser] = useState(null);
+  const [checkingAuth, setCheckingAuth] = useState(true);
+
   const [videos, setVideos] = useState([]);
   const [selected, setSelected] = useState("");
   const [data, setData] = useState(null);
@@ -17,8 +23,17 @@ function App() {
   const [isEnded, setIsEnded] = useState(false);
 
   useEffect(() => {
-    listVideos().then((res) => setVideos(res.videos));
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setCheckingAuth(false);
+    });
+    return unsub;
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    listVideos().then((res) => setVideos(res.videos));
+  }, [user]);
 
   useEffect(() => {
     if (!data || !canvasRef.current) return;
@@ -71,12 +86,27 @@ function App() {
 
   const phase = data?.risk?.phase;
 
+  if (checkingAuth) {
+    return <div className="min-h-screen bg-neutral-950" />;
+  }
+
+  if (!user) {
+    return <Login onLogin={() => {}} />;
+  }
+
   return (
     <div className="min-h-screen bg-neutral-950 text-white p-6">
-      <h1 className="text-2xl font-bold mb-4">StampedeShield</h1>
+      <div className="flex justify-between items-center mb-4">
+        <h1 className="text-2xl font-bold">StampedeShield</h1>
+        <button
+          onClick={() => signOut(auth)}
+          className="text-sm text-neutral-400 hover:text-white"
+        >
+          Log out
+        </button>
+      </div>
 
       <div className="flex gap-6">
-        {/* Video panel */}
         <div className="flex-1">
           <canvas
             ref={canvasRef}
@@ -86,7 +116,6 @@ function App() {
           />
         </div>
 
-        {/* Sidebar */}
         <div className="w-72 space-y-4">
           <div className="bg-neutral-900 rounded-lg p-4 space-y-3">
             <label className="block text-sm text-neutral-400">Upload video</label>
