@@ -4,6 +4,7 @@ import cv2
 import asyncio
 import shutil
 from pathlib import Path
+import time
 
 import sys
 from pathlib import Path
@@ -24,25 +25,30 @@ app.add_middleware(
 def health():
     return {"status": "ok"}
 
-
-
 @app.websocket("/ws/stream")
 async def stream(websocket: WebSocket):
     await websocket.accept()
-
-    # first message from client tells us what to stream: "webcam" or a filename
     config_msg = await websocket.receive_json()
     source_type = config_msg.get("source_type", "file")
     source = 0 if source_type == "webcam" else str(UPLOAD_DIR / config_msg["filename"])
 
     pipeline = StampedePipeline()
     cap = cv2.VideoCapture(source)
+    was_imminent = False
+
     try:
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
             output = pipeline.process_frame(frame)
+
+            if output["risk"]:
+                is_imminent = output["risk"]["phase"] == "IMMINENT"
+                if is_imminent and not was_imminent:
+                    print(f"[ALERT] IMMINENT risk detected at {time.strftime('%X')}")
+                was_imminent = is_imminent
+
             payload = {
                 "num_people": len(output["tracks"]),
                 "tracks": [{"id": t["track_id"], "bbox": t["bbox"]} for t in output["tracks"]],
@@ -66,3 +72,9 @@ async def upload_video(file: UploadFile = File(...)):
     with open(dest, "wb") as f:
         shutil.copyfileobj(file.file, f)
     return {"filename": file.filename, "path": str(dest)}
+
+
+@app.get("/videos")
+def list_videos():
+    files = [f.name for f in UPLOAD_DIR.iterdir() if f.suffix.lower() in (".mp4", ".mov", ".avi")]
+    return {"videos": files}
