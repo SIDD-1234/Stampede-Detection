@@ -4,6 +4,7 @@ import cv2
 import asyncio
 import shutil
 from pathlib import Path
+import sys
 import time
 import base64
 from alerts import send_sms_alert, send_email_alert
@@ -11,9 +12,6 @@ sys.path.append(str(Path(__file__).resolve().parent.parent / "ai_pipeline"))
 from pipeline import StampedePipeline
 from config import settings
 
-import sys
-from pathlib import Path
-sys.path.append(str(Path(__file__).resolve().parent.parent / "ai_pipeline"))
 
 app = FastAPI(title="StampedeShield API")
 
