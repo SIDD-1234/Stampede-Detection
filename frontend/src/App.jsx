@@ -1,124 +1,162 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { useState, useEffect, useRef } from "react";
+import { listVideos, uploadVideo, connectStream } from "./api";
+
+const PHASE_STYLES = {
+  NORMAL: "bg-green-500",
+  RISING: "bg-orange-500",
+  IMMINENT: "bg-red-500 animate-pulse",
+};
 
 function App() {
-  const [count, setCount] = useState(0)
+  const [videos, setVideos] = useState([]);
+  const [selected, setSelected] = useState("");
+  const [data, setData] = useState(null);
+  const wsRef = useRef(null);
+  const canvasRef = useRef(null);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [isEnded, setIsEnded] = useState(false);
+
+  useEffect(() => {
+    listVideos().then((res) => setVideos(res.videos));
+  }, []);
+
+  useEffect(() => {
+    if (!data || !canvasRef.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    const img = new Image();
+    img.onload = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = "#22c55e";
+      ctx.lineWidth = 2;
+      ctx.font = "14px sans-serif";
+      ctx.fillStyle = "#22c55e";
+      data.tracks.forEach((t) => {
+        const [x1, y1, x2, y2] = t.bbox;
+        ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+        ctx.fillText(`ID ${t.id}`, x1, y1 - 5);
+      });
+    };
+    img.src = `data:image/jpeg;base64,${data.frame}`;
+  }, [data]);
+
+  const handleUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    await uploadVideo(file);
+    const res = await listVideos();
+    setVideos(res.videos);
+  };
+
+  const startStream = () => {
+    if (!selected) return;
+    if (wsRef.current) wsRef.current.close();
+    setIsEnded(false);
+    setIsStreaming(true);
+    wsRef.current = connectStream(
+      { source_type: "file", filename: selected },
+      (payload) => setData(payload)
+    );
+    wsRef.current.onclose = () => {
+      setIsStreaming(false);
+      setIsEnded(true);
+    };
+  };
+
+  const stopStream = () => {
+    if (wsRef.current) wsRef.current.close();
+    setIsStreaming(false);
+  };
+
+  const phase = data?.risk?.phase;
 
   return (
-    <>
-      <h1 className="text-3xl font-bold text-blue-500">Test</h1>
+    <div className="min-h-screen bg-neutral-950 text-white p-6">
+      <h1 className="text-2xl font-bold mb-4">StampedeShield</h1>
 
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
+      <div className="flex gap-6">
+        {/* Video panel */}
+        <div className="flex-1">
+          <canvas
+            ref={canvasRef}
+            width={640}
+            height={480}
+            className="rounded-lg border border-neutral-800 bg-black w-full"
+          />
         </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
 
-      <div className="ticks"></div>
+        {/* Sidebar */}
+        <div className="w-72 space-y-4">
+          <div className="bg-neutral-900 rounded-lg p-4 space-y-3">
+            <label className="block text-sm text-neutral-400">Upload video</label>
+            <input
+              type="file"
+              accept="video/*"
+              onChange={handleUpload}
+              className="text-sm w-full file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:bg-neutral-800 file:text-white text-neutral-400"
+            />
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+            <label className="block text-sm text-neutral-400 pt-2">Select video</label>
+            <select
+              value={selected}
+              onChange={(e) => setSelected(e.target.value)}
+              className="w-full bg-neutral-800 rounded-md px-3 py-2 text-sm"
+            >
+              <option value="">Select video</option>
+              {videos.map((v) => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+            {!isStreaming ? (
+              <button
+                onClick={startStream}
+                className="w-full bg-blue-600 hover:bg-blue-500 rounded-md py-2 font-medium transition"
+              >
+                Start
+              </button>
+            ) : (
+              <button
+                onClick={stopStream}
+                className="w-full bg-neutral-700 hover:bg-neutral-600 rounded-md py-2 font-medium transition"
+              >
+                Stop
+              </button>
+            )}
+
+            {isEnded && (
+              <p className="text-xs text-neutral-500 text-center">Stream ended</p>
+            )}
+          </div>
+
+          {data && (
+            <div className="bg-neutral-900 rounded-lg p-4 space-y-3">
+              <div className={`${PHASE_STYLES[phase]} rounded-md px-3 py-2 font-bold text-center`}>
+                {phase} — {data.risk?.score}
+              </div>
+              <div className="flex justify-between text-sm text-neutral-400">
+                <span>People</span>
+                <span className="text-white font-medium">{data.num_people}</span>
+              </div>
+              <div className="flex justify-between text-sm text-neutral-400">
+                <span>Density</span>
+                <span className="text-white font-medium">{data.risk?.density}</span>
+              </div>
+              <div className="flex justify-between text-sm text-neutral-400">
+                <span>Entropy</span>
+                <span className="text-white font-medium">{data.risk?.entropy}</span>
+              </div>
+              <div className="flex justify-between text-sm text-neutral-400">
+                <span>Stagnation</span>
+                <span className="text-white font-medium">{data.risk?.stagnation}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
-export default App
+export default App;

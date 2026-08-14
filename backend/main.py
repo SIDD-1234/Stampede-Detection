@@ -5,6 +5,7 @@ import asyncio
 import shutil
 from pathlib import Path
 import time
+import base64
 
 import sys
 from pathlib import Path
@@ -49,7 +50,12 @@ async def stream(websocket: WebSocket):
                     print(f"[ALERT] IMMINENT risk detected at {time.strftime('%X')}")
                 was_imminent = is_imminent
 
+            # encode the (already resized) frame as JPEG -> base64
+            _, buffer = cv2.imencode(".jpg", output["frame"], [cv2.IMWRITE_JPEG_QUALITY, 60])
+            frame_b64 = base64.b64encode(buffer).decode("utf-8")
+
             payload = {
+                "frame": frame_b64,
                 "num_people": len(output["tracks"]),
                 "tracks": [{"id": t["track_id"], "bbox": t["bbox"]} for t in output["tracks"]],
                 "risk": output["risk"],
