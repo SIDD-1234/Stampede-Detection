@@ -23,3 +23,5 @@ frontend/.vite/
 *.pt
 
 uploads/
+
+.env
