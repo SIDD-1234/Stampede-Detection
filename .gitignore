@@ -19,3 +19,5 @@ frontend/.vite/
 
 # Logs / misc
 *.log
+*.mp4
+*.pt
