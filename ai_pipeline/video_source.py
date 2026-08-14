@@ -1,5 +1,8 @@
 import cv2
 
+from config import settings
+print(settings.confidence_threshold)
+
 class VideoSource:
     """Unified interface for file path / webcam index / stream URL."""
 

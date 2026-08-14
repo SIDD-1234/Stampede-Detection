@@ -6,6 +6,7 @@ class PersonDetector:
 
     def __init__(self):
         self.model = YOLO(settings.yolo_model)
+        self.model.to("mps")
 
     def detect(self, frame):
         results = self.model.predict(
@@ -13,6 +14,7 @@ class PersonDetector:
             classes=[self.PERSON_CLASS_ID],
             conf=settings.confidence_threshold,
             iou=settings.iou_threshold,
+            device="mps",
             verbose=False
         )
         detections = []
