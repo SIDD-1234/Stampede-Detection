@@ -1,8 +1,9 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import WebSocket, WebSocketDisconnect
 import cv2
 import asyncio
+import shutil
+from pathlib import Path
 
 import sys
 from pathlib import Path
@@ -28,9 +29,13 @@ def health():
 @app.websocket("/ws/stream")
 async def stream(websocket: WebSocket):
     await websocket.accept()
-    pipeline = StampedePipeline()
-    source = "/Users/siddhanthmungekar/Documents/FINAL YEAR/Project/Crowd-Activity-All.mp4"  # placeholder, hardcode for now
 
+    # first message from client tells us what to stream: "webcam" or a filename
+    config_msg = await websocket.receive_json()
+    source_type = config_msg.get("source_type", "file")
+    source = 0 if source_type == "webcam" else str(UPLOAD_DIR / config_msg["filename"])
+
+    pipeline = StampedePipeline()
     cap = cv2.VideoCapture(source)
     try:
         while True:
@@ -44,8 +49,20 @@ async def stream(websocket: WebSocket):
                 "risk": output["risk"],
             }
             await websocket.send_json(payload)
-            await asyncio.sleep(1 / 15)  # ~15 FPS pacing
+            await asyncio.sleep(1 / 15)
     except WebSocketDisconnect:
         pass
     finally:
         cap.release()
+
+
+
+UPLOAD_DIR = Path(__file__).resolve().parent / "uploads"
+UPLOAD_DIR.mkdir(exist_ok=True)
+
+@app.post("/upload")
+async def upload_video(file: UploadFile = File(...)):
+    dest = UPLOAD_DIR / file.filename
+    with open(dest, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+    return {"filename": file.filename, "path": str(dest)}

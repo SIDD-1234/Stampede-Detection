@@ -21,3 +21,5 @@ frontend/.vite/
 *.log
 *.mp4
 *.pt
+
+uploads/
