@@ -1,38 +1,28 @@
-import os
 import smtplib
 from email.mime.text import MIMEText
 from twilio.rest import Client
-from dotenv import load_dotenv
-
-load_dotenv()
-
-def _bool_env(key, default="true"):
-    return os.getenv(key, default).lower() == "true"
+from alert_config import alert_settings
 
 def send_sms_alert(message: str):
-    if not (_bool_env("ALERTS_ENABLED") and _bool_env("SMS_ENABLED")):
+    if not (alert_settings.alerts_enabled and alert_settings.sms_enabled):
         print("[ALERT] SMS skipped (disabled via .env)")
         return
-    client = Client(os.getenv("TWILIO_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
+    client = Client(alert_settings.twilio_sid, alert_settings.twilio_auth_token)
     client.messages.create(
         body=message,
-        from_=os.getenv("TWILIO_FROM_NUMBER"),
-        to=os.getenv("TWILIO_TO_NUMBER"),
+        from_=alert_settings.twilio_from_number,
+        to=alert_settings.twilio_to_number,
     )
 
 def send_email_alert(subject: str, message: str):
-    if not (_bool_env("ALERTS_ENABLED") and _bool_env("EMAIL_ENABLED")):
+    if not (alert_settings.alerts_enabled and alert_settings.email_enabled):
         print("[ALERT] Email skipped (disabled via .env)")
         return
-    sender = os.getenv("GMAIL_ADDRESS")
-    password = os.getenv("GMAIL_APP_PASSWORD")
-    to = os.getenv("GMAIL_TO")
-
     msg = MIMEText(message)
     msg["Subject"] = subject
-    msg["From"] = sender
-    msg["To"] = to
+    msg["From"] = alert_settings.gmail_address
+    msg["To"] = alert_settings.gmail_to
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(sender, password)
-        server.sendmail(sender, to, msg.as_string())
+        server.login(alert_settings.gmail_address, alert_settings.gmail_app_password)
+        server.sendmail(alert_settings.gmail_address, alert_settings.gmail_to, msg.as_string())
