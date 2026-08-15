@@ -37,6 +37,8 @@ async def stream(websocket: WebSocket):
     cap = cv2.VideoCapture(source)
     was_imminent = False
     last_alert_time = 0
+    alert_count = 0
+    MAX_ALERTS_PER_SESSION = 3
 
     try:
         while True:
@@ -49,14 +51,18 @@ async def stream(websocket: WebSocket):
                 is_imminent = output["risk"]["phase"] == "IMMINENT"
                 now = time.time()
                 if is_imminent and not was_imminent and (now - last_alert_time) > settings.alert_cooldown_seconds:
-                    print(f"[ALERT] IMMINENT risk detected at {time.strftime('%X')}")
-                    alert_msg = f"StampedeShield ALERT: IMMINENT risk detected at {time.strftime('%X')} — {len(output['tracks'])} people in frame."
-                    try:
-                        send_sms_alert(alert_msg)
-                        send_email_alert("StampedeShield Alert", alert_msg)
-                    except Exception as e:
-                        print(f"[ALERT ERROR] Failed to send alert: {e}")
-                    last_alert_time = now
+                    if alert_count < MAX_ALERTS_PER_SESSION:
+                        print(f"[ALERT] IMMINENT risk detected at {time.strftime('%X')}")
+                        alert_msg = f"StampedeShield ALERT: IMMINENT risk detected at {time.strftime('%X')} — {len(output['tracks'])} people in frame."
+                        try:
+                            send_sms_alert(alert_msg)
+                            send_email_alert("StampedeShield Alert", alert_msg)
+                        except Exception as e:
+                            print(f"[ALERT ERROR] Failed to send alert: {e}")
+                        alert_count += 1
+                        last_alert_time = now
+                    else:
+                        print("[ALERT] Max alerts reached for this session, skipping")
                 was_imminent = is_imminent
 
             # encode the (already resized) frame as JPEG -> base64
