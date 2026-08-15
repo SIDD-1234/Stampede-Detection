@@ -18,8 +18,8 @@ class Settings(BaseSettings):
     density_threshold: float = 0.7
     entropy_threshold: float = 0.6
     stagnation_threshold: float = 0.5
-    risk_score_stable_max: int = 40
-    risk_score_rising_max: int = 70   # above this = IMMINENT
+    risk_score_stable_max: int = 10
+    risk_score_rising_max: int = 20   # above this = IMMINENT
 
     # Pipeline
     target_fps: int = 15
@@ -31,5 +31,6 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_prefix = "STAMPEDE_"
+        extra = "ignore"
 
 settings = Settings()

@@ -4,6 +4,7 @@ from tracker import PersonTracker
 from motion import MotionEstimator
 from risk_scorer import RiskScorer
 from config import settings
+import sys
 
 class StampedePipeline:
     def __init__(self):
@@ -65,5 +66,6 @@ class StampedePipeline:
                         (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
 
 if __name__ == "__main__":
+    source = sys.argv[1] if len(sys.argv) > 1 else "/Users/siddhanthmungekar/Documents/FINAL YEAR/Project/backend/uploads/Crowd-Activity-All.mp4"
     pipeline = StampedePipeline()
-    pipeline.run_on_source("/Users/siddhanthmungekar/Documents/FINAL YEAR/Project/Crowd-Activity-All.mp4")
+    pipeline.run_on_source(source)

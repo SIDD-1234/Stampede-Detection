@@ -11,7 +11,8 @@ from alerts import send_sms_alert, send_email_alert
 sys.path.append(str(Path(__file__).resolve().parent.parent / "ai_pipeline"))
 from pipeline import StampedePipeline
 from config import settings
-
+from pydantic import BaseModel
+from alert_config import alert_settings
 
 app = FastAPI(title="StampedeShield API")
 
@@ -39,37 +40,53 @@ async def stream(websocket: WebSocket):
     last_alert_time = 0
     alert_count = 0
     MAX_ALERTS_PER_SESSION = 3
+    session_start = time.time()
+
+    def make_log(event_type, message):
+        return {
+            "type": "log",
+            "event": event_type,
+            "message": message,
+            "timestamp": time.strftime("%X"),
+        }
 
     try:
         while True:
             ret, frame = cap.read()
             if not ret:
+                await websocket.send_json(make_log("info", "Stream ended (video finished)"))
                 break
             output = pipeline.process_frame(frame)
 
             if output["risk"]:
                 is_imminent = output["risk"]["phase"] == "IMMINENT"
                 now = time.time()
+
+                # log every phase transition, not just IMMINENT
+                if output["risk"]["phase"] != getattr(stream, "_last_phase", None):
+                    await websocket.send_json(make_log("phase_change", f'Risk phase: {output["risk"]["phase"]} (score {output["risk"]["score"]})'))
+                    stream._last_phase = output["risk"]["phase"]
+
                 if is_imminent and not was_imminent and (now - last_alert_time) > settings.alert_cooldown_seconds:
                     if alert_count < MAX_ALERTS_PER_SESSION:
-                        print(f"[ALERT] IMMINENT risk detected at {time.strftime('%X')}")
                         alert_msg = f"StampedeShield ALERT: IMMINENT risk detected at {time.strftime('%X')} — {len(output['tracks'])} people in frame."
+                        await websocket.send_json(make_log("alert", alert_msg))
                         try:
                             send_sms_alert(alert_msg)
                             send_email_alert("StampedeShield Alert", alert_msg)
                         except Exception as e:
-                            print(f"[ALERT ERROR] Failed to send alert: {e}")
+                            await websocket.send_json(make_log("error", f"Alert send failed: {e}"))
                         alert_count += 1
                         last_alert_time = now
                     else:
-                        print("[ALERT] Max alerts reached for this session, skipping")
+                        await websocket.send_json(make_log("info", "Max alerts reached for this session"))
                 was_imminent = is_imminent
 
-            # encode the (already resized) frame as JPEG -> base64
             _, buffer = cv2.imencode(".jpg", output["frame"], [cv2.IMWRITE_JPEG_QUALITY, 60])
             frame_b64 = base64.b64encode(buffer).decode("utf-8")
 
             payload = {
+                "type": "frame",
                 "frame": frame_b64,
                 "num_people": len(output["tracks"]),
                 "tracks": [{"id": t["track_id"], "bbox": t["bbox"]} for t in output["tracks"]],
@@ -99,3 +116,19 @@ async def upload_video(file: UploadFile = File(...)):
 def list_videos():
     files = [f.name for f in UPLOAD_DIR.iterdir() if f.suffix.lower() in (".mp4", ".mov", ".avi")]
     return {"videos": files}
+
+class AlertToggle(BaseModel):
+    email_enabled: bool = None
+    sms_enabled: bool = None
+
+@app.post("/settings/alerts")
+def update_alert_settings(toggle: AlertToggle):
+    if toggle.email_enabled is not None:
+        alert_settings.email_enabled = toggle.email_enabled
+    if toggle.sms_enabled is not None:
+        alert_settings.sms_enabled = toggle.sms_enabled
+    return {"email_enabled": alert_settings.email_enabled, "sms_enabled": alert_settings.sms_enabled}
+
+@app.get("/settings/alerts")
+def get_alert_settings():
+    return {"email_enabled": alert_settings.email_enabled, "sms_enabled": alert_settings.sms_enabled}
