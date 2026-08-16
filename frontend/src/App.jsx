@@ -130,8 +130,8 @@ function App() {
               key={item.id}
               onClick={() => setActiveView(item.id)}
               className={`w-full text-left px-3 py-2 rounded-md text-sm transition ${activeView === item.id
-                  ? "bg-blue-600 text-white"
-                  : "text-neutral-400 hover:bg-neutral-800 hover:text-white"
+                ? "bg-blue-600 text-white"
+                : "text-neutral-400 hover:bg-neutral-800 hover:text-white"
                 }`}
             >
               {item.label}
@@ -266,14 +266,61 @@ function App() {
         )}
 
         {activeView === "reports" && (
-          <div>
-            <h2 className="text-xl font-bold mb-4">Reports</h2>
-            <p className="text-neutral-500 text-sm">Coming soon — session report generation.</p>
-          </div>
+          <ReportsPanel />
         )}
       </div>
     </div>
   );
 }
 
+function ReportsPanel() {
+  const [reports, setReports] = useState([]);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/reports`).then(r => r.json()).then(res => {
+      const withIndex = res.reports.map((r, i) => ({ ...r, _index: i }));
+      setReports(withIndex.reverse());
+    });
+  }, []);
+
+  const downloadReport = (index) => {
+    window.open(`${API_BASE}/reports/${index}/pdf`, "_blank");
+  };
+
+  return (
+    <div>
+      <h2 className="text-xl font-bold mb-4">Session Reports</h2>
+      {reports.length === 0 && <p className="text-neutral-500 text-sm">No completed sessions yet</p>}
+      <div className="space-y-3">
+        {reports.map((r, i) => (
+          <div key={i} className="bg-neutral-900 rounded-lg p-4">
+            <div className="flex justify-between items-start mb-2">
+              <div>
+                <p className="font-medium">{r.source}</p>
+                <p className="text-xs text-neutral-500">{r.start_time} — {r.duration_seconds}s</p>
+              </div>
+              <button
+                onClick={() => downloadReport(r._index)}
+                className="bg-blue-600 hover:bg-blue-500 text-xs px-3 py-1.5 rounded-md"
+              >
+                Download PDF
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-sm text-neutral-400">
+              <div>Max people: <span className="text-white">{r.max_people}</span></div>
+              <div>Max risk score: <span className="text-white">{r.max_risk_score}</span></div>
+              <div>Alerts triggered: <span className="text-white">{r.alert_events.length}</span></div>
+              <div>Frames processed: <span className="text-white">{r.frame_count}</span></div>
+            </div>
+            <div className="mt-2 text-xs text-neutral-500">
+              Phase time — NORMAL: {r.phase_durations.NORMAL?.toFixed(1)}s,
+              RISING: {r.phase_durations.RISING?.toFixed(1)}s,
+              IMMINENT: {r.phase_durations.IMMINENT?.toFixed(1)}s
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 export default App;

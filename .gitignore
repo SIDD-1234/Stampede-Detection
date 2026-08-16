@@ -26,3 +26,4 @@ uploads/
 
 .env
 backend/.env
+backend/reports.json

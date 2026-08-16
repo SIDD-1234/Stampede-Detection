@@ -13,6 +13,9 @@ from pipeline import StampedePipeline
 from config import settings
 from pydantic import BaseModel
 from alert_config import alert_settings
+import json
+from fastapi.responses import Response
+from report_pdf import generate_report_pdf
 
 app = FastAPI(title="StampedeShield API")
 
@@ -26,6 +29,21 @@ app.add_middleware(
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+REPORTS_FILE = Path(__file__).resolve().parent / "reports.json"
+
+def load_reports():
+    if REPORTS_FILE.exists():
+        with open(REPORTS_FILE, "r") as f:
+            return json.load(f)
+    return []
+
+def save_report(report):
+    reports = load_reports()
+    reports.append(report)
+    with open(REPORTS_FILE, "w") as f:
+        json.dump(reports, f, indent=2)
+
 
 @app.websocket("/ws/stream")
 async def stream(websocket: WebSocket):
@@ -42,13 +60,19 @@ async def stream(websocket: WebSocket):
     MAX_ALERTS_PER_SESSION = 3
     session_start = time.time()
 
+    session_stats = {
+        "source": config_msg.get("filename", "webcam"),
+        "start_time": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "max_people": 0,
+        "max_risk_score": 0,
+        "phase_durations": {"NORMAL": 0, "RISING": 0, "IMMINENT": 0},
+        "alert_events": [],
+        "frame_count": 0,
+    }
+    last_frame_time = time.time()
+
     def make_log(event_type, message):
-        return {
-            "type": "log",
-            "event": event_type,
-            "message": message,
-            "timestamp": time.strftime("%X"),
-        }
+        return {"type": "log", "event": event_type, "message": message, "timestamp": time.strftime("%X")}
 
     try:
         while True:
@@ -58,19 +82,27 @@ async def stream(websocket: WebSocket):
                 break
             output = pipeline.process_frame(frame)
 
-            if output["risk"]:
-                is_imminent = output["risk"]["phase"] == "IMMINENT"
-                now = time.time()
+            now = time.time()
+            dt = now - last_frame_time
+            last_frame_time = now
+            session_stats["frame_count"] += 1
+            session_stats["max_people"] = max(session_stats["max_people"], len(output["tracks"]))
 
-                # log every phase transition, not just IMMINENT
-                if output["risk"]["phase"] != getattr(stream, "_last_phase", None):
-                    await websocket.send_json(make_log("phase_change", f'Risk phase: {output["risk"]["phase"]} (score {output["risk"]["score"]})'))
-                    stream._last_phase = output["risk"]["phase"]
+            if output["risk"]:
+                phase = output["risk"]["phase"]
+                session_stats["phase_durations"][phase] = session_stats["phase_durations"].get(phase, 0) + dt
+                session_stats["max_risk_score"] = max(session_stats["max_risk_score"], output["risk"]["score"])
+
+                is_imminent = phase == "IMMINENT"
+                if phase != getattr(stream, "_last_phase", None):
+                    await websocket.send_json(make_log("phase_change", f'Risk phase: {phase} (score {output["risk"]["score"]})'))
+                    stream._last_phase = phase
 
                 if is_imminent and not was_imminent and (now - last_alert_time) > settings.alert_cooldown_seconds:
                     if alert_count < MAX_ALERTS_PER_SESSION:
                         alert_msg = f"StampedeShield ALERT: IMMINENT risk detected at {time.strftime('%X')} — {len(output['tracks'])} people in frame."
                         await websocket.send_json(make_log("alert", alert_msg))
+                        session_stats["alert_events"].append({"time": time.strftime("%X"), "message": alert_msg})
                         try:
                             send_sms_alert(alert_msg)
                             send_email_alert("StampedeShield Alert", alert_msg)
@@ -98,6 +130,9 @@ async def stream(websocket: WebSocket):
         pass
     finally:
         cap.release()
+        session_stats["end_time"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        session_stats["duration_seconds"] = round(time.time() - session_start, 1)
+        save_report(session_stats)
 
 
 
@@ -132,3 +167,19 @@ def update_alert_settings(toggle: AlertToggle):
 @app.get("/settings/alerts")
 def get_alert_settings():
     return {"email_enabled": alert_settings.email_enabled, "sms_enabled": alert_settings.sms_enabled}
+
+@app.get("/reports")
+def get_reports():
+    return {"reports": load_reports()[-10:]}
+
+@app.get("/reports/{index}/pdf")
+def download_report_pdf(index: int):
+    reports = load_reports()
+    if index < 0 or index >= len(reports):
+        return Response(content="Report not found", status_code=404)
+    pdf_bytes = generate_report_pdf(reports[index])
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=stampedeshield_report_{index}.pdf"}
+    )
