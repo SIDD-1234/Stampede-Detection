@@ -11,7 +11,7 @@ def generate_report_pdf(report: dict) -> bytes:
     styles = getSampleStyleSheet()
     elements = []
 
-    elements.append(Paragraph("StampedeShield — Session Report", styles["Title"]))
+    elements.append(Paragraph("CrowdPulse — Session Report", styles["Title"]))
     elements.append(Spacer(1, 10))
 
     meta = [

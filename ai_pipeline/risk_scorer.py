@@ -1,12 +1,14 @@
 import numpy as np
 from collections import deque
 from config import settings
+from change_detector import ChangeDetector
 
 class RiskScorer:
     def __init__(self, ema_alpha=0.3):
         self.ema_alpha = ema_alpha
         self.ema_score = 0.0
         self.position_history = {}  # track_id -> deque of recent positions
+        self.change_detector = ChangeDetector()
 
     def _density_score(self, tracks, frame_shape):
         """People per grid cell, normalized 0-1."""
@@ -59,6 +61,7 @@ class RiskScorer:
         density = self._density_score(tracks, frame_shape)
         entropy = self._entropy_score(motion_vectors)
         stagnation = self._stagnation_score(tracks)
+        change = self.change_detector.update(density, entropy, stagnation)
 
         raw = (density * 50) + (entropy * 20) + (stagnation * 30)  # weights, tune later
         raw = min(raw, 100)
@@ -78,4 +81,5 @@ class RiskScorer:
             "density": round(density, 2),
             "entropy": round(entropy, 2),
             "stagnation": round(stagnation, 2),
+            "change": change,
         }

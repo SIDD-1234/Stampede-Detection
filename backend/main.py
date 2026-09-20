@@ -17,7 +17,7 @@ import json
 from fastapi.responses import Response
 from report_pdf import generate_report_pdf
 
-app = FastAPI(title="StampedeShield API")
+app = FastAPI(title="CrowdPulse API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -50,11 +50,24 @@ async def stream(websocket: WebSocket):
     await websocket.accept()
     config_msg = await websocket.receive_json()
     source_type = config_msg.get("source_type", "file")
-    source = 0 if source_type == "webcam" else str(UPLOAD_DIR / config_msg["filename"])
+    if source_type == "webcam":
+        source = 0
+    elif source_type == "ip_webcam":
+        source = config_msg.get("stream_url")
+        if not source:
+            await websocket.send_json({"type": "log", "event": "error", "message": "No stream URL provided", "timestamp": time.strftime("%X")})
+            await websocket.close()
+            return
+    else:  # "file"
+        source = str(UPLOAD_DIR / config_msg["filename"])
 
     pipeline = StampedePipeline()
     cap = cv2.VideoCapture(source)
-    was_imminent = False
+    if not cap.isOpened():
+        await websocket.send_json({"type": "log", "event": "error", "message": f"Could not open source: {source_type}", "timestamp": time.strftime("%X")})
+        await websocket.close()
+        return
+    last_event_type = None
     last_alert_time = 0
     alert_count = 0
     MAX_ALERTS_PER_SESSION = 3
@@ -93,26 +106,36 @@ async def stream(websocket: WebSocket):
                 session_stats["phase_durations"][phase] = session_stats["phase_durations"].get(phase, 0) + dt
                 session_stats["max_risk_score"] = max(session_stats["max_risk_score"], output["risk"]["score"])
 
-                is_imminent = phase == "IMMINENT"
                 if phase != getattr(stream, "_last_phase", None):
                     await websocket.send_json(make_log("phase_change", f'Risk phase: {phase} (score {output["risk"]["score"]})'))
                     stream._last_phase = phase
 
-                if is_imminent and not was_imminent and (now - last_alert_time) > settings.alert_cooldown_seconds:
-                    if alert_count < MAX_ALERTS_PER_SESSION:
-                        alert_msg = f"StampedeShield ALERT: IMMINENT risk detected at {time.strftime('%X')} — {len(output['tracks'])} people in frame."
-                        await websocket.send_json(make_log("alert", alert_msg))
-                        session_stats["alert_events"].append({"time": time.strftime("%X"), "message": alert_msg})
-                        try:
-                            send_sms_alert(alert_msg)
-                            send_email_alert("StampedeShield Alert", alert_msg)
-                        except Exception as e:
-                            await websocket.send_json(make_log("error", f"Alert send failed: {e}"))
-                        alert_count += 1
-                        last_alert_time = now
-                    else:
-                        await websocket.send_json(make_log("info", "Max alerts reached for this session"))
-                was_imminent = is_imminent
+                change = output["risk"].get("change", {})
+                event_type = change.get("event_type")
+
+                if event_type and event_type != last_event_type:
+                    await websocket.send_json({
+                        "type": "detection",
+                        "event_type": event_type,
+                        "z_scores": {k: v for k, v in change.items() if k.startswith("z_")},
+                        "timestamp": time.strftime("%X"),
+                    })
+                    if event_type == "STAMPEDE" and (now - last_alert_time) > settings.alert_cooldown_seconds:
+                        if alert_count < MAX_ALERTS_PER_SESSION:
+                            alert_msg = f"CrowdPulse ALERT: STAMPEDE detected at {time.strftime('%X')} — {len(output['tracks'])} people in frame."
+                            await websocket.send_json(make_log("alert", alert_msg))
+                            session_stats["alert_events"].append({"time": time.strftime("%X"), "message": alert_msg})
+                            try:
+                                send_sms_alert(alert_msg)
+                                send_email_alert("StampedeShield Alert", alert_msg)
+                            except Exception as e:
+                                await websocket.send_json(make_log("error", f"Alert send failed: {e}"))
+                            alert_count += 1
+                            last_alert_time = now
+                        else:
+                            await websocket.send_json(make_log("info", "Max alerts reached for this session"))
+
+                last_event_type = event_type
 
             _, buffer = cv2.imencode(".jpg", output["frame"], [cv2.IMWRITE_JPEG_QUALITY, 60])
             frame_b64 = base64.b64encode(buffer).decode("utf-8")
@@ -168,9 +191,26 @@ def update_alert_settings(toggle: AlertToggle):
 def get_alert_settings():
     return {"email_enabled": alert_settings.email_enabled, "sms_enabled": alert_settings.sms_enabled}
 
+class PipelineSettingsUpdate(BaseModel):
+    confidence_threshold: float = None
+    z_threshold: float = None
+
+@app.post("/settings/pipeline")
+def update_pipeline_settings(update: PipelineSettingsUpdate):
+    if update.confidence_threshold is not None:
+        settings.confidence_threshold = update.confidence_threshold
+    if update.z_threshold is not None:
+        settings.z_threshold = update.z_threshold
+    return {"confidence_threshold": settings.confidence_threshold, "z_threshold": settings.z_threshold}
+
+@app.get("/settings/pipeline")
+def get_pipeline_settings():
+    return {"confidence_threshold": settings.confidence_threshold, "z_threshold": settings.z_threshold}
+
 @app.get("/reports")
 def get_reports():
-    return {"reports": load_reports()[-10:]}
+    reports = load_reports()
+    return {"reports": [{**r, "_id": i} for i, r in enumerate(reports)]}
 
 @app.get("/reports/{index}/pdf")
 def download_report_pdf(index: int):

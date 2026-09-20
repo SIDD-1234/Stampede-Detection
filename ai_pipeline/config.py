@@ -1,6 +1,7 @@
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
+    z_threshold: float = 2.5
     # Detection
     yolo_model: str = "yolov8n.pt"
     confidence_threshold: float = 0.4
